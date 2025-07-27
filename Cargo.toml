@@ -1,9 +1,9 @@
 [package]
-name = "eframe_template"
+name = "AnotherChatApp"
 version = "0.1.0"
-authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
+authors = ["Ali Mirza <M.Ali.Mirza@proton.me>"] #TODO:: add your name hoe
 edition = "2024"
-include = ["LICENSE-APACHE", "LICENSE-MIT", "**/*.rs", "Cargo.toml"]
+include = ["**/*.rs", "Cargo.toml"]
 rust-version = "1.85"
 
 [package.metadata.docs.rs]
