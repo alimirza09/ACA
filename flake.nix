@@ -37,6 +37,7 @@
             xorg.libXi
             xorg.libX11
 
+            vimPlugins.rustaceanvim
           ];
 
           LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";
