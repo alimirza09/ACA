@@ -17,7 +17,6 @@
           buildInputs = [
             # Rust
             rust-bin.stable.latest.default
-            trunk
 
             # misc. libraries
             openssl
@@ -37,7 +36,6 @@
             xorg.libXi
             xorg.libX11
 
-            vimPlugins.rustaceanvim
           ];
 
           LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";
