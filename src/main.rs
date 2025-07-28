@@ -19,6 +19,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Another Chat App",
         native_options,
-        Box::new(|cc| Ok(Box::new(AnotherChatApp::AnotherChatApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(another_chat_app::AnotherChatApp::new(cc)))),
     )
 }

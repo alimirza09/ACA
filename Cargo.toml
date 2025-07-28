@@ -1,5 +1,5 @@
 [package]
-name = "AnotherChatApp"
+name = "another_chat_app"
 version = "0.1.0"
 authors = ["Ali Mirza <M.Ali.Mirza@proton.me>"] #TODO:: add your name hoe
 edition = "2024"
@@ -24,15 +24,12 @@ log = "0.4.27"
 
 # You only need serde if you want app persistence:
 serde = { version = "1.0.219", features = ["derive"] }
+libp2p = "0.56.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11.8"
 
-# web:
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen-futures = "0.4.50"
-web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
 
 [profile.release]
 opt-level = 2 # fast and small wasm

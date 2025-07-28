@@ -1,6 +1,9 @@
 #![warn(clippy::all, rust_2018_idioms)]
-#![allow(clippy::nonstandard_macro_braces)]
-#[allow(non_snake_case)]
+
+pub use libp2p::bytes;
+pub use libp2p::futures;
+pub use libp2p::identity;
+
 pub mod app;
 pub mod backend;
 pub use app::AnotherChatApp;
