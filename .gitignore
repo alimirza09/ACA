@@ -8,7 +8,7 @@ dist
 target
 target_ra
 target_wasm
-direnv
+.direnv
 
 # https://github.com/lycheeverse/lychee
 .lycheecache
