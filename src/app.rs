@@ -2,7 +2,6 @@
 use crate::backend;
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-#[allow(non_snake_case)]
 
 pub struct AnotherChatApp {
     // Example stuff:
