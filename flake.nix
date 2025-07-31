@@ -37,7 +37,7 @@
             xorg.libX11
 
             cargo-watch
-
+            zellij
             rust-analyzer
 
           ];
