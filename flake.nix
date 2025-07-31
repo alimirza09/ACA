@@ -36,6 +36,10 @@
             xorg.libXi
             xorg.libX11
 
+            cargo-watch
+
+            rust-analyzer
+
           ];
 
           LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";

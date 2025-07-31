@@ -11,7 +11,7 @@ pub struct AnotherChatApp {
 impl Default for AnotherChatApp {
     fn default() -> Self {
         Self {
-            label: "Another Chat App".to_owned(),
+            label: "".to_owned(),
         }
     }
 }
@@ -19,11 +19,7 @@ impl Default for AnotherChatApp {
 impl AnotherChatApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // This is also where you can customize the look and feel of egui using
-        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
-
         // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
@@ -40,7 +36,6 @@ impl eframe::App for AnotherChatApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
         egui::SidePanel::left("contacts").show(ctx, |ui| {
@@ -52,7 +47,10 @@ impl eframe::App for AnotherChatApp {
                     let message =
                         ui.add(egui::TextEdit::singleline(&mut self.label).hint_text("message"));
                     if message.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        backend::handle_message(&self.label);
+                        match backend::handle_message(&self.label) {
+                            Err(why) => panic!("Handle Message Failed {}", why),
+                            Ok(_) => println!("handle_message worked???!"),
+                        };
 
                         self.label.clear();
                     }
