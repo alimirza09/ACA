@@ -49,7 +49,11 @@ impl eframe::App for AnotherChatApp {
                     if message.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         match backend::handle_message(&self.label) {
                             Err(why) => panic!("Handle Message Failed {}", why),
+<<<<<<< HEAD
                             Ok(_) => println!("handle_message worked???!"),
+=======
+                            Ok(_) => println!("handle_message worked"),
+>>>>>>> 03966b0 (added arti and tokio)
                         };
 
                         self.label.clear();
