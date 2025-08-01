@@ -22,14 +22,9 @@ eframe = { version = "0.32", default-features = false, features = [
 ] }
 log = "0.4.27"
 
-# You only need serde if you want app persistence:
 serde = { version = "1.0.219", features = ["derive"] }
-tokio = { version = "1.0", features = ["full"] }
-arti-client = "0.32.0"
-torut = "0.2"
-clap = { version = "4.0", features = ["derive"] }
-anyhow = "1.0"
-rand = "0.8"
+tokio = { version = "1.47.0", features = ["full"]}
+anyhow = "1.0.98"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
