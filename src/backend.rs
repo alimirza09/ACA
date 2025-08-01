@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, create_dir};
 use std::io::prelude::*;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -8,6 +8,7 @@ use tokio::process::{Child, Command};
 use tokio::time::{Duration, sleep};
 
 const FILE_PATH: &str = "messages.csv";
+
 const USER_ID: &str = "userid";
 
 pub fn handle_message(message: &str) -> std::io::Result<()> {
@@ -23,21 +24,30 @@ pub fn handle_message(message: &str) -> std::io::Result<()> {
 }
 
 async fn generate_tor_config(hidden_service_port: u16) -> Result<()> {
+    let data_dir = dirs::data_dir().unwrap().join("another-chat-app");
+    let tor_data_dir = dirs::data_dir()
+        .unwrap()
+        .join("another-chat-app")
+        .join("tor");
+    if !data_dir.exists() {
+        create_dir(&data_dir)?;
+        create_dir(&tor_data_dir)?;
+    }
     let torrc_path = format!("/tmp/torrc-{}", std::process::id());
     let content = format!(
         "# Tor configuration for hidden service
-DataDirectory /tmp/tor-data-{}
+DataDirectory {}
 SocksPort 9050
 ControlPort 9051
 CookieAuthentication 1
 
-HiddenServiceDir /tmp/tor-hidden-service-{}
+HiddenServiceDir {}
 HiddenServicePort 80 127.0.0.1:{}
 
 Log notice stdout
 ",
-        std::process::id(),
-        std::process::id(),
+        tor_data_dir.display(),
+        tor_data_dir.join("hidden_service").display(),
         hidden_service_port
     );
     println!("writing torrc");
@@ -66,8 +76,12 @@ async fn start_tor(hidden_service_port: u16) -> Result<Child> {
             }
         }
     }
+    let tor_data_dir = dirs::data_dir()
+        .unwrap()
+        .join("another-chat-app")
+        .join("tor");
 
-    let hostname_path = format!("/tmp/tor-hidden-service-{}/hostname", std::process::id());
+    let hostname_path = tor_data_dir.join("hidden_service").join("hostname");
     for _ in 0..30 {
         if tokio::fs::metadata(&hostname_path).await.is_ok() {
             let onion_address = tokio::fs::read_to_string(&hostname_path).await?;
