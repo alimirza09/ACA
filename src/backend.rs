@@ -1,26 +1,17 @@
 use anyhow::{Context, Result};
-use std::fs::{OpenOptions, create_dir};
-use std::io::prelude::*;
+use std::fs::create_dir;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, sleep};
 
-const FILE_PATH: &str = "messages.csv";
+// const FILE_PATH: &str = "messages.csv";
+//
+// const USER_ID: &str = "userid";
 
-const USER_ID: &str = "userid";
-
-pub fn handle_message(message: &str) -> std::io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(false)
-        .append(true)
-        .open(FILE_PATH)
-        .unwrap();
-    let message_and_metadata = format!("{}, {} \n", message, USER_ID);
-    file.write_all(message_and_metadata.as_bytes())?;
-    Ok(())
+pub async fn handle_incoming_message(request: String, stream: &mut TcpStream) {
+    println!("{request}");
 }
 
 async fn generate_tor_config(hidden_service_port: u16) -> Result<()> {
@@ -106,6 +97,11 @@ async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) ->
     if bytes_read > 0 {
         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
         println!("Received request:\n{}", request);
+        if request.starts_with("POST /send") {
+            handle_incoming_message(request.into_owned(), &mut stream).await;
+        } else if request.starts_with("GET /messages") {
+            // serve_messages(&mut stream).await?;
+        }
 
         let body = "<html><body><h1>Wassup</h1></body></html>";
         let response = format!(

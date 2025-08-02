@@ -2,7 +2,6 @@
 use crate::backend;
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-
 pub struct AnotherChatApp {
     // Example stuff:
     label: String,
@@ -11,7 +10,7 @@ pub struct AnotherChatApp {
 impl Default for AnotherChatApp {
     fn default() -> Self {
         Self {
-            label: "".to_owned(),
+            label: String::new().clone(),
         }
     }
 }
@@ -47,10 +46,10 @@ impl eframe::App for AnotherChatApp {
                     let message =
                         ui.add(egui::TextEdit::singleline(&mut self.label).hint_text("message"));
                     if message.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        match backend::handle_message(&self.label) {
-                            Err(why) => panic!("Handle Message Failed {}", why),
-                            Ok(_) => println!("handle_message worked"),
-                        };
+                        // match backend::handle_message(&self.label) {
+                        //     Err(why) => panic!("Handle Message Failed {why}",),
+                        //     Ok(_) => println!("handle_message worked"),
+                        // };
 
                         self.label.clear();
                     }
