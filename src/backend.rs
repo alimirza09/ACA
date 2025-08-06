@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use arti_client::{TorClient, TorClientConfig};
 use std::fs::OpenOptions;
 use std::fs::create_dir;
 use std::io::prelude::*;
@@ -61,16 +60,16 @@ async fn handle_incoming_message(request: String, stream: &mut TcpStream) -> Res
     Ok(())
 }
 
-async fn receive_messages_as_client(onion_peer: &str) -> Result<()> {
-    let config = TorClientConfig::default();
-    let tor_client = TorClient::create_bootstrapped(config).await?;
-    let mut stream = tor_client.connect(onion_peer).await?;
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-        .await?;
-
-    Ok(())
-}
+// async fn receive_messages_as_client(onion_peer: &str) -> Result<()> {
+// let config = TorClientConfig::default();
+// let tor_client = TorClient::create_bootstrapped(config).await?;
+// let mut stream = tor_client.connect(onion_peer).await?;
+// stream
+//     .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+//     .await?;
+//
+// Ok(())
+// }
 
 async fn generate_tor_config(hidden_service_port: u16) -> Result<()> {
     let data_dir = dirs::data_dir().unwrap().join("another-chat-app");
