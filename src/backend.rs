@@ -1,17 +1,75 @@
 use anyhow::{Context, Result};
+use arti_client::{TorClient, TorClientConfig};
+use std::fs::OpenOptions;
 use std::fs::create_dir;
+use std::io::prelude::*;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, sleep};
 
-// const FILE_PATH: &str = "messages.csv";
-//
-// const USER_ID: &str = "userid";
+const FILE_PATH: &str = "messages.csv";
+const USER_ID: &str = "userid";
 
-pub async fn handle_incoming_message(request: String, stream: &mut TcpStream) {
-    println!("{request}");
+fn extract_message_from_body(body: &str) -> Option<String> {
+    for line in body.lines() {
+        if line.starts_with("message=") {
+            let message = &line[8..];
+            return Some(url_decode(message));
+        }
+    }
+    None
+}
+
+fn url_decode(s: &str) -> String {
+    s.replace("%20", " ")
+        .replace("%21", "!")
+        .replace("%3F", "?")
+}
+
+pub fn handle_message(message: &str) -> std::io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(false)
+        .append(true)
+        .open(FILE_PATH)
+        .unwrap();
+
+    let message_and_metadata = format!("{}, {} \n", message, USER_ID);
+
+    file.write_all(message_and_metadata.as_bytes())?;
+
+    Ok(())
+}
+
+async fn handle_incoming_message(request: String, stream: &mut TcpStream) -> Result<()> {
+    if let Some(body_start) = request.find("\r\n\r\n") {
+        let body = &request[body_start + 4..];
+        if let Some(message) = extract_message_from_body(body) {
+            if let Err(e) = handle_message(&message) {
+                eprintln!("failed to write message to csv: {}", e);
+            }
+
+            let response = "HTTP/1.1 200 OK\r\n\r\nMessage received";
+            stream.write_all(response.as_bytes()).await?;
+            return Ok(());
+        }
+    }
+    let response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid message";
+    stream.write_all(response.as_bytes()).await?;
+    Ok(())
+}
+
+async fn receive_messages_as_client(onion_peer: &str) -> Result<()> {
+    let config = TorClientConfig::default();
+    let tor_client = TorClient::create_bootstrapped(config).await?;
+    let mut stream = tor_client.connect(onion_peer).await?;
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+        .await?;
+
+    Ok(())
 }
 
 async fn generate_tor_config(hidden_service_port: u16) -> Result<()> {
@@ -98,26 +156,26 @@ async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) ->
         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
         println!("Received request:\n{}", request);
         if request.starts_with("POST /send") {
-            handle_incoming_message(request.into_owned(), &mut stream).await;
+            handle_incoming_message(request.into_owned(), &mut stream).await?;
         } else if request.starts_with("GET /messages") {
             // serve_messages(&mut stream).await?;
+        } else {
+            let body = "<html><body><h1>Wassup</h1></body></html>";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\n\
+                Content-Type: text/html\r\n\
+                Content-Length: {}\r\n\
+                \r\n\
+                {}",
+                body.len(),
+                body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .context("Failed to write response")?;
         }
-
-        let body = "<html><body><h1>Wassup</h1></body></html>";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\n\
-             Content-Type: text/html\r\n\
-             Content-Length: {}\r\n\
-             \r\n\
-             {}",
-            body.len(),
-            body
-        );
-
-        stream
-            .write_all(response.as_bytes())
-            .await
-            .context("Failed to write response")?;
     }
 
     Ok(())
