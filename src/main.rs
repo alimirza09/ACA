@@ -8,8 +8,9 @@ use tokio;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    let port = 8000;
     tokio::spawn(async move {
-        let _ = setup_tor_and_http(8000).await;
+        let _ = setup_tor_and_http(port).await;
     });
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

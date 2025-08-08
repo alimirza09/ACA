@@ -2,6 +2,7 @@
 use crate::backend;
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
+//
 pub struct AnotherChatApp {
     // Example stuff:
     label: String,
@@ -46,10 +47,11 @@ impl eframe::App for AnotherChatApp {
                     let message =
                         ui.add(egui::TextEdit::singleline(&mut self.label).hint_text("message"));
                     if message.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        // match backend::handle_message(&self.label) {
-                        //     Err(why) => panic!("Handle Message Failed {why}",),
-                        //     Ok(_) => println!("handle_message worked"),
-                        // };
+                        let buffer = self.label.clone();
+                        tokio::spawn(async move {
+                            let _ = backend::send_message_to_peer(&buffer, backend::ONION_PEER, 80)
+                                .await;
+                        });
 
                         self.label.clear();
                     }
