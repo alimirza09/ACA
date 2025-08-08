@@ -1,7 +1,7 @@
 [package]
 name = "another_chat_app"
 version = "0.1.0"
-authors = ["Ali Mirza <M.Ali.Mirza@proton.me>"] #TODO:: add your name hoe
+authors = ["Ali Mirza <M.Ali.Mirza@proton.me>", "Ali Imran Mohsin <email@gmail.com>"] #TODO:: add your email hoe
 edition = "2024"
 include = ["**/*.rs", "Cargo.toml"]
 rust-version = "1.85"
@@ -26,7 +26,6 @@ serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.47.0", features = ["full"]}
 anyhow = "1.0.98"
 dirs = "6.0.0"
-torut = "0.2.1"
 tokio-socks = "0.5.2"
 
 # native:
