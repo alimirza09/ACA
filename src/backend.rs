@@ -10,7 +10,7 @@ use tokio_socks::tcp::socks5::*;
 
 pub const ONION_PEER: &str = "2q5vuf6janc644n72xtuahyet7leyul3ce3cxisuubldamhkontkamyd.onion";
 
-//TODO: CLEAN EXIT
+// TODO: CLEAN EXIT
 
 async fn connect_to_peer(onion_peer: &str, port: u16) -> Result<TcpStream> {
     let stream =
@@ -24,13 +24,13 @@ fn determine_onion_address() -> Result<String> {
     let onion_address = std::fs::read_to_string(hostname_file)?;
     Ok(onion_address.trim().to_string())
 }
+
 pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) -> Result<()> {
     let mut stream = connect_to_peer(onion_peer, port).await?;
     let onion_address = determine_onion_address()?;
     stream
         .write_all(format!("MSG:{} FROM:{}", message, onion_address).as_bytes())
         .await?;
-
     stream.flush().await?;
     Ok(())
 }
@@ -38,12 +38,10 @@ pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) ->
 async fn decode_incoming_message(message: &str) -> Option<(&str, &str)> {
     // This code is so shit I have to leave an explanation
     let message = message.trim().strip_prefix("MSG:")?; // Remove MSG
-
     let pos_of_from = message.rfind(" FROM:")?; // Reverse search to find the last FROM:
     let message_body = &message[0..pos_of_from]; // Then use range to cut the message till FROM:
     let sender = &message[pos_of_from + 6..]; // onion_address of the sender
     // I hate string manipulation could have I used regex? Maybe
-
     Some((message_body, sender))
 }
 
@@ -72,18 +70,19 @@ pub fn check_if_first_time() -> bool {
 }
 
 fn create_data_directories() -> (std::path::PathBuf, std::path::PathBuf) {
-    // TODO: REPLACE WITH
-    // ARRAY
+    // TODO: REPLACE WITH ARRAY
     let data_dir = dirs::data_dir().unwrap().join("another-chat-app");
     let tor_data_dir = dirs::data_dir()
         .unwrap()
         .join("another-chat-app")
         .join("tor");
+
     if check_if_first_time() {
         std::fs::create_dir(&data_dir).unwrap();
         std::fs::create_dir(&tor_data_dir).unwrap();
         std::fs::create_dir(&data_dir.join("messages")).unwrap();
     }
+
     return (data_dir, tor_data_dir);
 }
 
@@ -108,7 +107,6 @@ Log notice stdout
     );
     println!("writing torrc");
     tokio::fs::write(torrc_path, content).await?;
-
     Ok(())
 }
 
@@ -133,8 +131,10 @@ async fn start_tor(hidden_service_port: u16) -> Result<Child> {
             }
         }
     }
+
     let (_, tor_data_dir) = create_data_directories();
     let hostname_path = tor_data_dir.join("hidden_service").join("hostname");
+
     for _ in 0..30 {
         if tokio::fs::metadata(&hostname_path).await.is_ok() {
             let onion_address = determine_onion_address()?;
@@ -195,9 +195,7 @@ async fn start_http_server(port: u16) -> Result<()> {
 
 pub async fn setup_tor_and_http(port: u16) -> Result<()> {
     println!("Setting up Tor onion service...");
-
     start_tor(port).await?;
-
     start_http_server(port).await?;
     Ok(())
 }
