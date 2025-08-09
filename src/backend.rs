@@ -1,6 +1,4 @@
 use anyhow::{Context, Result};
-use std::fs::OpenOptions;
-use std::io::prelude::*;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -35,7 +33,7 @@ pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) ->
     Ok(())
 }
 
-async fn decode_incoming_message(message: &str) -> Option<(&str, &str)> {
+fn decode_incoming_message(message: &str) -> Option<(&str, &str)> {
     // This code is so shit I have to leave an explanation
     let message = message.trim().strip_prefix("MSG:")?; // Remove MSG
     let pos_of_from = message.rfind(" FROM:")?; // Reverse search to find the last FROM:
@@ -46,20 +44,24 @@ async fn decode_incoming_message(message: &str) -> Option<(&str, &str)> {
 }
 
 async fn handle_incoming_message(message: &str) -> Option<()> {
-    let (message, sender) = decode_incoming_message(message).await?;
+    let (message, sender) = decode_incoming_message(message)?;
     let (data_dir, _) = create_data_directories();
-    let message_dir = data_dir.join("messages.txt");
+    let message_dir = data_dir.join("messages");
 
     let message_file = message_dir.join(sender);
 
-    let mut message_file = OpenOptions::new()
+    let mut message_file_writeable = tokio::fs::OpenOptions::new()
         .write(true)
-        .create(!message_file.exists()) //Im so big brain
+        .create(true)
         .append(true)
         .open(message_file)
+        .await
         .ok()?;
 
-    message_file.write_all(message.as_bytes()).ok()?;
+    message_file_writeable
+        .write_all(message.as_bytes())
+        .await
+        .ok()?;
 
     Some(())
 }
@@ -159,7 +161,7 @@ async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) ->
     if bytes_read > 0 {
         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
         if request.starts_with("MSG:") {
-            handle_incoming_message(stringify!(request)).await;
+            handle_incoming_message(&request).await;
         }
         println!("Received request:\n{}", request);
     }
