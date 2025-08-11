@@ -29,18 +29,44 @@ pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) ->
     stream
         .write_all(format!("MSG:{} FROM:{}", message, onion_address).as_bytes())
         .await?;
+
     stream.flush().await?;
+
+    handle_outgoing_message(message, onion_peer).await;
+
     Ok(())
 }
 
+async fn handle_outgoing_message(message: &str, receiver: &str) -> Option<()> {
+    let (data_dir, _) = create_data_directories();
+    let message_dir = data_dir.join("messages");
+
+    let message_file = message_dir.join(receiver);
+
+    let message_body_with_newline = String::from("SENT: ") + message + "\n";
+
+    let mut message_file_writeable = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(message_file)
+        .await
+        .ok()?;
+
+    message_file_writeable
+        .write_all(message_body_with_newline.as_bytes())
+        .await
+        .ok()?;
+
+    Some(())
+}
+
 fn decode_incoming_message(message: &str) -> Option<(String, &str)> {
-    // This code is so shit I have to leave an explanation
-    let message = message.trim().strip_prefix("MSG:")?; // Remove MSG
-    let pos_of_from = message.rfind(" FROM:")?; // Reverse search to find the last FROM:
-    let message_body = &message[0..pos_of_from]; // Then use range to cut the message till FROM:
-    let sender = &message[pos_of_from + 6..]; // onion_address of the sender
-    // I hate string manipulation could have I used regex? Maybe
-    let message_body_with_newline = message_body.to_string() + "\n";
+    let message = message.trim().strip_prefix("MSG:")?;
+    let pos_of_from = message.rfind(" FROM:")?;
+    let message_body = &message[0..pos_of_from];
+    let sender = &message[pos_of_from + 6..];
+    let message_body_with_newline = String::from("RECEIVED: ") + message_body + "\n";
     Some((message_body_with_newline, sender))
 }
 
@@ -72,7 +98,7 @@ pub fn check_if_first_time() -> bool {
     !data_dir.exists()
 }
 
-fn create_data_directories() -> (std::path::PathBuf, std::path::PathBuf) {
+pub fn create_data_directories() -> (std::path::PathBuf, std::path::PathBuf) {
     // TODO: REPLACE WITH ARRAY
     let data_dir = dirs::data_dir().unwrap().join("another-chat-app");
     let tor_data_dir = dirs::data_dir()
@@ -193,6 +219,15 @@ async fn start_http_server(port: u16) -> Result<()> {
                 eprintln!("Failed to accept connection: {}", e);
             }
         }
+    }
+}
+pub async fn get_message_count(sender: &str) -> usize {
+    let (data_dir, _) = create_data_directories();
+    let message_file = data_dir.join("messages").join(sender);
+
+    match tokio::fs::read_to_string(message_file).await {
+        Ok(content) => content.lines().count(),
+        Err(_) => 0,
     }
 }
 
