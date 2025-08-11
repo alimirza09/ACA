@@ -33,14 +33,15 @@ pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) ->
     Ok(())
 }
 
-fn decode_incoming_message(message: &str) -> Option<(&str, &str)> {
+fn decode_incoming_message(message: &str) -> Option<(String, &str)> {
     // This code is so shit I have to leave an explanation
     let message = message.trim().strip_prefix("MSG:")?; // Remove MSG
     let pos_of_from = message.rfind(" FROM:")?; // Reverse search to find the last FROM:
     let message_body = &message[0..pos_of_from]; // Then use range to cut the message till FROM:
     let sender = &message[pos_of_from + 6..]; // onion_address of the sender
     // I hate string manipulation could have I used regex? Maybe
-    Some((message_body, sender))
+    let message_body_with_newline = message_body.to_string() + "\n";
+    Some((message_body_with_newline, sender))
 }
 
 async fn handle_incoming_message(message: &str) -> Option<()> {
