@@ -8,8 +8,6 @@ use tokio_socks::tcp::socks5::*;
 
 pub const ONION_PEER: &str = "2q5vuf6janc644n72xtuahyet7leyul3ce3cxisuubldamhkontkamyd.onion";
 
-// TODO: CLEAN EXIT
-
 async fn connect_to_peer(onion_peer: &str, port: u16) -> Result<TcpStream> {
     let stream =
         Socks5Stream::connect("127.0.0.1:9050", format!("{}:{}", onion_peer, port)).await?;
@@ -29,23 +27,18 @@ pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) ->
     stream
         .write_all(format!("MSG:{} FROM:{}", message, onion_address).as_bytes())
         .await?;
-
     stream.flush().await?;
-
     handle_outgoing_message(message, onion_peer).await;
-
     Ok(())
 }
 
 async fn handle_outgoing_message(message: &str, receiver: &str) -> Option<()> {
     let (data_dir, _) = create_data_directories();
     let message_dir = data_dir.join("messages");
-
     let message_file = message_dir.join(receiver);
-
     let message_body_with_newline = String::from("SENT: ") + message + "\n";
 
-    let mut message_file_writeable = tokio::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
@@ -53,11 +46,9 @@ async fn handle_outgoing_message(message: &str, receiver: &str) -> Option<()> {
         .await
         .ok()?;
 
-    message_file_writeable
-        .write_all(message_body_with_newline.as_bytes())
+    file.write_all(message_body_with_newline.as_bytes())
         .await
         .ok()?;
-
     Some(())
 }
 
@@ -74,10 +65,9 @@ async fn handle_incoming_message(message: &str) -> Option<()> {
     let (message, sender) = decode_incoming_message(message)?;
     let (data_dir, _) = create_data_directories();
     let message_dir = data_dir.join("messages");
-
     let message_file = message_dir.join(sender);
 
-    let mut message_file_writeable = tokio::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
@@ -85,11 +75,7 @@ async fn handle_incoming_message(message: &str) -> Option<()> {
         .await
         .ok()?;
 
-    message_file_writeable
-        .write_all(message.as_bytes())
-        .await
-        .ok()?;
-
+    file.write_all(message.as_bytes()).await.ok()?;
     Some(())
 }
 
@@ -99,20 +85,16 @@ pub fn check_if_first_time() -> bool {
 }
 
 pub fn create_data_directories() -> (std::path::PathBuf, std::path::PathBuf) {
-    // TODO: REPLACE WITH ARRAY
     let data_dir = dirs::data_dir().unwrap().join("another-chat-app");
-    let tor_data_dir = dirs::data_dir()
-        .unwrap()
-        .join("another-chat-app")
-        .join("tor");
+    let tor_data_dir = data_dir.join("tor");
 
     if check_if_first_time() {
         std::fs::create_dir(&data_dir).unwrap();
         std::fs::create_dir(&tor_data_dir).unwrap();
-        std::fs::create_dir(&data_dir.join("messages")).unwrap();
+        std::fs::create_dir(data_dir.join("messages")).unwrap();
     }
 
-    return (data_dir, tor_data_dir);
+    (data_dir, tor_data_dir)
 }
 
 async fn generate_tor_config(hidden_service_port: u16) -> Result<()> {
@@ -221,6 +203,7 @@ async fn start_http_server(port: u16) -> Result<()> {
         }
     }
 }
+
 pub async fn get_message_count(sender: &str) -> usize {
     let (data_dir, _) = create_data_directories();
     let message_file = data_dir.join("messages").join(sender);
