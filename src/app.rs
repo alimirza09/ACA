@@ -197,16 +197,6 @@ impl eframe::App for AnotherChatApp {
                     .map(|c| c.onion_address.clone());
 
                 if let Some(contact_address) = contact_address {
-                    ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                        egui::ScrollArea::vertical()
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                let messages = self.load_messages_for_contact(&contact_address);
-                                for (sender, message) in messages {
-                                    ui.label(format!("{}: {}", sender, message));
-                                }
-                            });
-                    });
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                         ui.horizontal(|ui| {
                             let response = ui.add_sized(
@@ -231,6 +221,16 @@ impl eframe::App for AnotherChatApp {
                                 self.message_field.clear();
                             }
                         });
+
+                        egui::ScrollArea::vertical()
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                let mut messages = self.load_messages_for_contact(&contact_address);
+                                messages.reverse();
+                                for (sender, message) in messages {
+                                    ui.label(format!("{}: {}", sender, message));
+                                }
+                            });
 
                         ui.separator();
                     });
