@@ -6,8 +6,6 @@ use tokio::process::{Child, Command};
 use tokio::time::{Duration, sleep};
 use tokio_socks::tcp::socks5::*;
 
-pub const ONION_PEER: &str = "2q5vuf6janc644n72xtuahyet7leyul3ce3cxisuubldamhkontkamyd.onion";
-
 async fn connect_to_peer(onion_peer: &str, port: u16) -> Result<TcpStream> {
     let stream =
         Socks5Stream::connect("127.0.0.1:9050", format!("{}:{}", onion_peer, port)).await?;

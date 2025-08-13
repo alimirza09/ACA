@@ -53,6 +53,9 @@ impl AnotherChatApp {
     }
 
     fn load_messages_for_contact(&self, contact_address: &str) -> Vec<(String, String)> {
+        if let Ok(mut cache) = self.message_cache.lock() {
+            cache.remove(contact_address);
+        }
         if let Ok(cache) = self.message_cache.lock() {
             if let Some(messages) = cache.get(contact_address) {
                 return messages.clone();
