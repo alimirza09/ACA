@@ -1,6 +1,5 @@
 use crate::backend::*;
 use serde::{Deserialize, Serialize};
-use std::io::prelude::*;
 use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -102,44 +101,10 @@ impl AnotherChatApp {
             .map(|c| c.alias.clone())
     }
 
-    fn save_message(&self, contact_address: &str, message: &str, is_sent: bool) {
-        let (data_dir, _) = create_data_directories();
-        let message_file = data_dir.join("messages").join(contact_address);
-
-        if let Some(parent) = message_file.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        let prefix = if is_sent { "SENT" } else { "RECEIVED" };
-        let log_entry = format!("{}: {}\n", prefix, message);
-
-        if let Err(e) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&message_file)
-            .and_then(|mut file| file.write_all(log_entry.as_bytes()))
-        {
-            eprintln!("Failed to save message: {}", e);
-        }
-
-        if let Ok(mut cache) = self.message_cache.lock() {
-            let entry = cache.entry(contact_address.to_string()).or_default();
-            let sender = if is_sent {
-                "You".to_string()
-            } else {
-                self.get_contact_alias(contact_address)
-                    .unwrap_or_else(|| "Peer".to_string())
-            };
-            entry.push((sender, message.to_string()));
-        }
-    }
-
     fn send_message_to_selected_contact(&mut self, message: String) {
         if let Some(contact_idx) = self.selected_contact {
             if let Some(contact) = self.contacts.get(contact_idx) {
                 let contact_address = contact.onion_address.clone();
-
-                self.save_message(&contact_address, &message, true);
 
                 tokio::spawn(async move {
                     match send_message_to_peer(&message, &contact_address, 80).await {
