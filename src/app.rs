@@ -1,4 +1,5 @@
 use crate::backend::*;
+use egui::Color32;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -221,14 +222,54 @@ impl eframe::App for AnotherChatApp {
                                 self.message_field.clear();
                             }
                         });
-
                         egui::ScrollArea::vertical()
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
                                 let mut messages = self.load_messages_for_contact(&contact_address);
                                 messages.reverse();
                                 for (sender, message) in messages {
-                                    ui.label(format!("{}: {}", sender, message));
+                                    let (bg_color, align, text_color) = if sender == "You" {
+                                        (
+                                            Color32::from_rgb(0, 192, 249),
+                                            egui::Align::RIGHT,
+                                            Color32::BLACK,
+                                        )
+                                    } else {
+                                        (
+                                            Color32::from_rgb(0, 131, 185),
+                                            egui::Align::LEFT,
+                                            Color32::WHITE,
+                                        )
+                                    };
+
+                                    let padding = egui::vec2(8.0, 4.0);
+                                    let rounding = 8.0;
+
+                                    ui.with_layout(egui::Layout::bottom_up(align), |ui| {
+                                        let font_id = egui::TextStyle::Body.resolve(ui.style());
+                                        let max_text_width = ui.available_width() * 0.75;
+                                        let galley = ui.fonts(|fonts| {
+                                            fonts.layout(
+                                                message.clone(),
+                                                font_id.clone(),
+                                                text_color,
+                                                max_text_width,
+                                            )
+                                        });
+
+                                        let size = galley.size() + 2.0 * padding;
+
+                                        let (rect, _) =
+                                            ui.allocate_exact_size(size, egui::Sense::hover());
+                                        ui.painter().rect_filled(rect, rounding, bg_color);
+                                        ui.painter().galley(
+                                            rect.min + padding,
+                                            galley,
+                                            Color32::WHITE,
+                                        );
+                                    });
+
+                                    ui.add_space(5.0);
                                 }
                             });
 

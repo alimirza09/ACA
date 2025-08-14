@@ -8,8 +8,11 @@ use tokio;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    another_chat_app::crypto::init_crypto();
+
     let port = 8000;
     tokio::spawn(async move {
+        let _ = another_chat_app::backend::crypto_setup();
         let _ = setup_tor_and_http(port).await;
     });
     let native_options = eframe::NativeOptions {

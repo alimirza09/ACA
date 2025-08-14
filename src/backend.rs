@@ -1,10 +1,103 @@
+use crate::crypto::{encode_public_key, generate_and_store_keypair, load_keypair};
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, sleep};
 use tokio_socks::tcp::socks5::*;
+
+#[derive(Serialize, Deserialize)]
+pub struct Contact {
+    onion_address: String,
+    alias: String,
+    pk: String,
+}
+
+async fn handshake(onion_peer: &str) -> Result<()> {
+    let (data_dir, _) = create_data_directories();
+    let message_dir = data_dir.join("messages");
+    let message_file = message_dir.join(onion_peer);
+    let (pk, _) = crypto_setup();
+    let pk_b64 = encode_public_key(&pk);
+
+    if !message_file.exists() {
+        let mut stream = connect_to_peer(onion_peer, 8000).await?;
+        let handshake = format!("HANDSHAKE: {}:{}", onion_peer, pk_b64);
+        stream.write_all(handshake.as_bytes()).await?
+    }
+    Ok(())
+}
+
+pub async fn add_new_contact(contact: Contact) -> Result<()> {
+    let (data_dir, _) = create_data_directories();
+    let contacts_file = data_dir.join("contacts").join("contacts.json");
+
+    let mut contacts: Vec<Contact> = if contacts_file.exists() {
+        let data = tokio::fs::read(&contacts_file).await?;
+        serde_json::from_slice(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    contacts.push(contact);
+
+    let smth = serde_json::to_string_pretty(&contacts)?;
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(contacts_file)
+        .await?;
+    file.write_all(smth.as_bytes()).await?;
+
+    Ok(())
+}
+pub async fn read_contacts() -> Result<Vec<Contact>> {
+    let (data_dir, _) = create_data_directories();
+    let contacts_file = data_dir.join("contacts").join("contacts.json");
+
+    if !contacts_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    let data = tokio::fs::read(&contacts_file).await?;
+
+    let contacts: Vec<Contact> = serde_json::from_slice(&data)?;
+
+    Ok(contacts)
+}
+
+pub fn crypto_setup() -> (PublicKey, SecretKey) {
+    let (data_dir, _) = create_data_directories();
+    if check_if_first_time() {
+        let (pk, sk) = generate_and_store_keypair(&data_dir);
+        (pk, sk)
+    } else {
+        load_keypair(&data_dir)
+    }
+}
+fn decode_handshake(request: &str) -> Option<(&str, &str)> {
+    let request = request.trim().strip_prefix("HANDSHAKE:")?;
+    let parts: Vec<&str> = request.splitn(2, ": ").collect();
+    let onion_peer = parts[0];
+    let pk_peer_b64 = parts[1];
+    Some((onion_peer, pk_peer_b64))
+}
+
+async fn handle_handshake(request: &str) -> Result<()> {
+    let (onion_peer, pk_peer_b64) = decode_handshake(request).unwrap();
+    Ok(())
+}
+
+fn check_if_first_contact(onion_peer: &str) -> bool {
+    let (data_dir, _) = create_data_directories();
+    let message_dir = data_dir.join("messages");
+    let message_file = message_dir.join(onion_peer);
+    message_file.exists()
+}
 
 async fn connect_to_peer(onion_peer: &str, port: u16) -> Result<TcpStream> {
     let stream =
@@ -22,6 +115,9 @@ fn determine_onion_address() -> Result<String> {
 pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) -> Result<()> {
     let mut stream = connect_to_peer(onion_peer, port).await?;
     let onion_address = determine_onion_address()?;
+    if check_if_first_contact(onion_peer) {
+        handshake(onion_peer).await?;
+    }
     stream
         .write_all(format!("MSG:{} FROM:{}", message, onion_address).as_bytes())
         .await?;
@@ -90,6 +186,7 @@ pub fn create_data_directories() -> (std::path::PathBuf, std::path::PathBuf) {
         std::fs::create_dir(&data_dir).unwrap();
         std::fs::create_dir(&tor_data_dir).unwrap();
         std::fs::create_dir(data_dir.join("messages")).unwrap();
+        std::fs::create_dir(data_dir.join("contacts")).unwrap();
     }
 
     (data_dir, tor_data_dir)
@@ -169,6 +266,8 @@ async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) ->
         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
         if request.starts_with("MSG:") {
             handle_incoming_message(&request).await;
+        } else if request.starts_with("HANDSHAKE:") {
+            handle_handshake(&request).await?;
         }
         println!("Received request:\n{}", request);
     }
