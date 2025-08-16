@@ -1,6 +1,10 @@
-use crate::crypto::{encode_public_key, generate_and_store_keypair, load_keypair};
+use crate::app::Contact;
+use crate::crypto::{
+    decrypt_message, encode_public_key, encrypt_message, generate_and_store_keypair, load_keypair,
+    parse_public_key,
+};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use base64::{Engine as _, engine::general_purpose};
 use sodiumoxide::crypto::box_::{PublicKey, SecretKey};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -9,21 +13,20 @@ use tokio::process::{Child, Command};
 use tokio::time::{Duration, sleep};
 use tokio_socks::tcp::socks5::*;
 
-#[derive(Serialize, Deserialize)]
-pub struct Contact {
-    onion_address: String,
-    alias: String,
-    pk: String,
+pub async fn get_message_count(sender: &str) -> usize {
+    let message_file = message_file(sender);
+
+    match tokio::fs::read_to_string(message_file).await {
+        Ok(content) => content.lines().count(),
+        Err(_) => 0,
+    }
 }
 
 async fn handshake(onion_peer: &str) -> Result<()> {
-    let (data_dir, _) = create_data_directories();
-    let message_dir = data_dir.join("messages");
-    let message_file = message_dir.join(onion_peer);
     let (pk, _) = crypto_setup();
     let pk_b64 = encode_public_key(&pk);
 
-    if !message_file.exists() {
+    if check_if_first_contact(onion_peer) {
         let mut stream = connect_to_peer(onion_peer, 8000).await?;
         let handshake = format!("HANDSHAKE: {}:{}", onion_peer, pk_b64);
         stream.write_all(handshake.as_bytes()).await?
@@ -55,19 +58,96 @@ pub async fn add_new_contact(contact: Contact) -> Result<()> {
 
     Ok(())
 }
-pub async fn read_contacts() -> Result<Vec<Contact>> {
+pub fn load_contacts_from_json() -> Vec<Contact> {
     let (data_dir, _) = create_data_directories();
-    let contacts_file = data_dir.join("contacts").join("contacts.json");
+    let contacts_file = data_dir.join("contacts.json");
 
-    if !contacts_file.exists() {
-        return Ok(Vec::new());
+    match std::fs::read_to_string(contacts_file) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+pub fn store_pending_handshake(onion_address: &str, pk: &str) -> Result<()> {
+    let (data_dir, _) = create_data_directories();
+    let handshake_file = data_dir.join("pending_handshake.txt");
+
+    let handshake_data = format!("{}|{}", onion_address, pk);
+    std::fs::write(handshake_file, handshake_data)?;
+
+    Ok(())
+}
+
+pub fn check_for_pending_handshake() -> Result<Option<(String, String)>> {
+    let (data_dir, _) = create_data_directories();
+    let handshake_file = data_dir.join("pending_handshake.txt");
+
+    if !handshake_file.exists() {
+        return Ok(None);
     }
 
-    let data = tokio::fs::read(&contacts_file).await?;
+    let content = std::fs::read_to_string(&handshake_file)?;
+    std::fs::remove_file(&handshake_file)?;
+    if let Some((onion_address, pk)) = content.trim().split_once('|') {
+        Ok(Some((onion_address.to_string(), pk.to_string())))
+    } else {
+        Ok(None)
+    }
+}
 
-    let contacts: Vec<Contact> = serde_json::from_slice(&data)?;
+pub fn add_contact_to_json(onion_address: &str, alias: &str) {
+    let mut contacts = load_contacts_from_json();
 
-    Ok(contacts)
+    if contacts.iter().any(|c| c.onion_address == onion_address) {
+        return;
+    }
+
+    contacts.push(Contact {
+        onion_address: onion_address.to_string(),
+        alias: alias.to_string(),
+        pk: String::new(),
+    });
+
+    save_contacts_to_json(&contacts);
+    println!("Added contact: {} ({})", alias, onion_address);
+}
+
+pub fn update_contact_pk(onion_address: &str, pk: &str) -> Result<()> {
+    let mut contacts = load_contacts_from_json();
+
+    if let Some(contact) = contacts
+        .iter_mut()
+        .find(|c| c.onion_address == onion_address)
+    {
+        contact.pk = pk.to_string();
+        save_contacts_to_json(&contacts);
+        println!("Updated public key for contact: {}", onion_address);
+    }
+
+    Ok(())
+}
+
+async fn handle_handshake(request: &str) -> Result<()> {
+    if let Some((onion_peer, pk_peer_b64)) = decode_handshake(request) {
+        let contacts = load_contacts_from_json();
+        if let Some(_existing_contact) = contacts.iter().find(|c| c.onion_address == onion_peer) {
+            update_contact_pk(onion_peer, pk_peer_b64)?;
+        } else {
+            store_pending_handshake(onion_peer, pk_peer_b64)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn save_contacts_to_json(contacts: &[Contact]) {
+    let (data_dir, _) = create_data_directories();
+    let contacts_file = data_dir.join("contacts.json");
+
+    if let Ok(json) = serde_json::to_string_pretty(contacts) {
+        if let Err(e) = std::fs::write(contacts_file, json) {
+            eprintln!("Failed to save contacts: {}", e);
+        }
+    }
 }
 
 pub fn crypto_setup() -> (PublicKey, SecretKey) {
@@ -87,16 +167,32 @@ fn decode_handshake(request: &str) -> Option<(&str, &str)> {
     Some((onion_peer, pk_peer_b64))
 }
 
-async fn handle_handshake(request: &str) -> Result<()> {
-    let (onion_peer, pk_peer_b64) = decode_handshake(request).unwrap();
+pub fn message_file(onion_peer: &str) -> std::path::PathBuf {
+    let (data_dir, _) = create_data_directories();
+    let file_path = data_dir.join("messages").join(onion_peer);
+    if !file_path.exists() {
+        std::fs::File::create(file_path.clone()).unwrap();
+    }
+    file_path
+}
+pub fn create_file(file: &str, create: bool) -> Result<std::path::PathBuf> {
+    let (data_dir, _) = create_data_directories();
+    let file_path = data_dir.join(file);
+    if file_path.exists() && create {
+        std::fs::File::create(file_path.clone())?;
+    };
+
+    Ok(file_path)
+}
+
+pub fn remove_file(file: std::path::PathBuf) -> Result<()> {
+    std::fs::remove_file(file)?;
     Ok(())
 }
 
 fn check_if_first_contact(onion_peer: &str) -> bool {
-    let (data_dir, _) = create_data_directories();
-    let message_dir = data_dir.join("messages");
-    let message_file = message_dir.join(onion_peer);
-    message_file.exists()
+    let message_file = message_file(onion_peer);
+    !message_file.exists()
 }
 
 async fn connect_to_peer(onion_peer: &str, port: u16) -> Result<TcpStream> {
@@ -112,24 +208,8 @@ fn determine_onion_address() -> Result<String> {
     Ok(onion_address.trim().to_string())
 }
 
-pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) -> Result<()> {
-    let mut stream = connect_to_peer(onion_peer, port).await?;
-    let onion_address = determine_onion_address()?;
-    if check_if_first_contact(onion_peer) {
-        handshake(onion_peer).await?;
-    }
-    stream
-        .write_all(format!("MSG:{} FROM:{}", message, onion_address).as_bytes())
-        .await?;
-    stream.flush().await?;
-    handle_outgoing_message(message, onion_peer).await;
-    Ok(())
-}
-
 async fn handle_outgoing_message(message: &str, receiver: &str) -> Option<()> {
-    let (data_dir, _) = create_data_directories();
-    let message_dir = data_dir.join("messages");
-    let message_file = message_dir.join(receiver);
+    let message_file = message_file(receiver);
     let message_body_with_newline = String::from("SENT: ") + message + "\n";
 
     let mut file = tokio::fs::OpenOptions::new()
@@ -153,24 +233,6 @@ fn decode_incoming_message(message: &str) -> Option<(String, &str)> {
     let sender = &message[pos_of_from + 6..];
     let message_body_with_newline = String::from("RECEIVED: ") + message_body + "\n";
     Some((message_body_with_newline, sender))
-}
-
-async fn handle_incoming_message(message: &str) -> Option<()> {
-    let (message, sender) = decode_incoming_message(message)?;
-    let (data_dir, _) = create_data_directories();
-    let message_dir = data_dir.join("messages");
-    let message_file = message_dir.join(sender);
-
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open(message_file)
-        .await
-        .ok()?;
-
-    file.write_all(message.as_bytes()).await.ok()?;
-    Some(())
 }
 
 pub fn check_if_first_time() -> bool {
@@ -253,28 +315,6 @@ async fn start_tor(hidden_service_port: u16) -> Result<Child> {
     Ok(tor_process)
 }
 
-async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) -> Result<()> {
-    println!("New connection from: {}", addr);
-
-    let mut buffer = [0; 1024];
-    let bytes_read = stream
-        .read(&mut buffer)
-        .await
-        .context("Failed to read from connection")?;
-
-    if bytes_read > 0 {
-        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-        if request.starts_with("MSG:") {
-            handle_incoming_message(&request).await;
-        } else if request.starts_with("HANDSHAKE:") {
-            handle_handshake(&request).await?;
-        }
-        println!("Received request:\n{}", request);
-    }
-
-    Ok(())
-}
-
 async fn start_http_server(port: u16) -> Result<()> {
     let addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&addr)
@@ -301,19 +341,146 @@ async fn start_http_server(port: u16) -> Result<()> {
     }
 }
 
-pub async fn get_message_count(sender: &str) -> usize {
-    let (data_dir, _) = create_data_directories();
-    let message_file = data_dir.join("messages").join(sender);
-
-    match tokio::fs::read_to_string(message_file).await {
-        Ok(content) => content.lines().count(),
-        Err(_) => 0,
-    }
-}
-
 pub async fn setup_tor_and_http(port: u16) -> Result<()> {
     println!("Setting up Tor onion service...");
     start_tor(port).await?;
     start_http_server(port).await?;
     Ok(())
+}
+fn encrypt_message_for_peer(message: &str, onion_peer: &str) -> Result<Vec<u8>> {
+    let contacts = load_contacts_from_json();
+    let contact = contacts
+        .iter()
+        .find(|c| c.onion_address == onion_peer)
+        .ok_or_else(|| anyhow::anyhow!("Contact not found"))?;
+
+    if contact.pk.is_empty() {
+        return Err(anyhow::anyhow!("No public key for contact"));
+    }
+
+    let their_pk =
+        parse_public_key(&contact.pk).ok_or_else(|| anyhow::anyhow!("Invalid public key"))?;
+
+    let (_, my_sk) = crypto_setup();
+    let encrypted = encrypt_message(message.as_bytes(), &their_pk, &my_sk);
+    Ok(encrypted)
+}
+
+fn decrypt_message_from_peer(encrypted_data: &[u8], onion_peer: &str) -> Result<String> {
+    let contacts = load_contacts_from_json();
+    let contact = contacts
+        .iter()
+        .find(|c| c.onion_address == onion_peer)
+        .ok_or_else(|| anyhow::anyhow!("Contact not found"))?;
+
+    if contact.pk.is_empty() {
+        return Err(anyhow::anyhow!("No public key for contact"));
+    }
+
+    let their_pk =
+        parse_public_key(&contact.pk).ok_or_else(|| anyhow::anyhow!("Invalid public key"))?;
+
+    let (_, my_sk) = crypto_setup();
+    let decrypted = decrypt_message(encrypted_data, &their_pk, &my_sk)
+        .ok_or_else(|| anyhow::anyhow!("Failed to decrypt message"))?;
+
+    String::from_utf8(decrypted).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
+}
+
+pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) -> Result<()> {
+    let mut stream = connect_to_peer(onion_peer, port).await?;
+    let onion_address = determine_onion_address()?;
+
+    if check_if_first_contact(onion_peer) {
+        handshake(onion_peer).await?;
+    }
+
+    let message_to_send = match encrypt_message_for_peer(message, onion_peer) {
+        Ok(encrypted) => {
+            let encoded = general_purpose::STANDARD.encode(encrypted);
+            format!("ENCRYPTED_MSG:{} FROM:{}", encoded, onion_address)
+        }
+        Err(_) => {
+            format!("MSG:{} FROM:{}", message, onion_address)
+        }
+    };
+
+    stream.write_all(message_to_send.as_bytes()).await?;
+    stream.flush().await?;
+    handle_outgoing_message(message, onion_peer).await;
+    Ok(())
+}
+
+fn decode_encrypted_message(message: &str) -> Option<(Vec<u8>, &str)> {
+    let message = message.trim().strip_prefix("ENCRYPTED_MSG:")?;
+    let pos_of_from = message.rfind(" FROM:")?;
+    let encrypted_b64 = &message[0..pos_of_from];
+    let sender = &message[pos_of_from + 6..];
+    let encrypted_data = general_purpose::STANDARD.decode(encrypted_b64).ok()?;
+    Some((encrypted_data, sender))
+}
+
+async fn handle_incoming_message(message: &str) -> Option<()> {
+    let (message_body, sender) = if message.starts_with("ENCRYPTED_MSG:") {
+        let (encrypted_data, sender) = decode_encrypted_message(message)?;
+        let decrypted_message = match decrypt_message_from_peer(&encrypted_data, sender) {
+            Ok(decrypted) => decrypted,
+            Err(e) => {
+                eprintln!("Failed to decrypt message from {}: {}", sender, e);
+                return Some(());
+            }
+        };
+        let message_body_with_newline = String::from("RECEIVED: ") + &decrypted_message + "\n";
+        (message_body_with_newline, sender)
+    } else {
+        let (message_body, sender) = decode_incoming_message(message)?;
+        (message_body, sender)
+    };
+
+    let (data_dir, _) = create_data_directories();
+    let message_dir = data_dir.join("messages");
+    let message_file = message_dir.join(sender);
+
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(message_file)
+        .await
+        .ok()?;
+
+    file.write_all(message_body.as_bytes()).await.ok()?;
+    Some(())
+}
+
+async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) -> Result<()> {
+    println!("New connection from: {}", addr);
+
+    let mut buffer = [0; 2048];
+    let bytes_read = stream
+        .read(&mut buffer)
+        .await
+        .context("Failed to read from connection")?;
+
+    if bytes_read > 0 {
+        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+        if request.starts_with("MSG:") || request.starts_with("ENCRYPTED_MSG:") {
+            handle_incoming_message(&request).await;
+        } else if request.starts_with("HANDSHAKE:") {
+            if let Err(e) = handle_handshake(&request).await {
+                eprintln!("Failed to handle handshake: {}", e);
+            }
+        }
+        println!("Received request:\n{}", request);
+    }
+
+    Ok(())
+}
+
+pub fn can_encrypt_to_contact(onion_address: &str) -> bool {
+    let contacts = load_contacts_from_json();
+    contacts
+        .iter()
+        .find(|c| c.onion_address == onion_address)
+        .map_or(false, |c| !c.pk.is_empty())
 }

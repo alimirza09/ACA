@@ -3,10 +3,11 @@ use egui::Color32;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct Contact {
     pub onion_address: String,
     pub alias: String,
+    pub pk: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -17,6 +18,9 @@ pub struct AnotherChatApp {
     new_alias: String,
     contacts: Vec<Contact>,
     selected_contact: Option<usize>,
+    pending_handshake: Option<(String, String)>,
+    show_alias_prompt: bool,
+    alias_input: String,
     #[serde(skip)]
     message_cache: Arc<Mutex<std::collections::HashMap<String, Vec<(String, String)>>>>,
 }
@@ -29,20 +33,28 @@ impl Default for AnotherChatApp {
             new_alias: String::new(),
             contacts: Vec::new(),
             selected_contact: None,
+            pending_handshake: None,
+            show_alias_prompt: false,
+            alias_input: String::new(),
             message_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
 
 impl AnotherChatApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut app: Self = if let Some(storage) = cc.storage {
-            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
-        } else {
-            Default::default()
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let app = Self {
+            message_field: String::new(),
+            new_onion_address: String::new(),
+            new_alias: String::new(),
+            contacts: load_contacts_from_json(),
+            selected_contact: None,
+            pending_handshake: None,
+            show_alias_prompt: false,
+            alias_input: String::new(),
+            message_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
 
-        app.message_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
         app
     }
 
@@ -52,10 +64,78 @@ impl AnotherChatApp {
             && address.chars().take(56).all(|c| c.is_ascii_alphanumeric())
     }
 
-    fn load_messages_for_contact(&self, contact_address: &str) -> Vec<(String, String)> {
-        if let Ok(mut cache) = self.message_cache.lock() {
-            cache.remove(contact_address);
+    fn check_for_handshakes(&mut self) {
+        if let Ok(handshake_data) = check_for_pending_handshake() {
+            if let Some((onion_address, pk)) = handshake_data {
+                if let Some(contact) = self
+                    .contacts
+                    .iter_mut()
+                    .find(|c| c.onion_address == onion_address)
+                {
+                    contact.pk = pk;
+                    self.save_contacts();
+                } else {
+                    self.pending_handshake = Some((onion_address, pk));
+                    self.show_alias_prompt = true;
+                    self.alias_input.clear();
+                }
+            }
         }
+    }
+
+    fn update_contact_pk(&mut self, onion_address: &str, pk: String) {
+        if let Some(contact) = self
+            .contacts
+            .iter_mut()
+            .find(|c| c.onion_address == onion_address)
+        {
+            contact.pk = pk;
+            self.save_contacts();
+        }
+    }
+
+    fn refresh_contacts(&mut self) {
+        let all_contacts = load_contacts_from_json();
+        for contact in all_contacts {
+            let already_exists = self
+                .contacts
+                .iter()
+                .any(|c| c.onion_address == contact.onion_address);
+            if !already_exists {
+                self.contacts.push(contact);
+            }
+        }
+    }
+
+    fn save_contacts(&self) {
+        save_contacts_to_json(&self.contacts);
+    }
+
+    fn add_contact(&mut self, onion_address: String, alias: String) {
+        let new_contact = Contact {
+            onion_address,
+            alias,
+            pk: String::new(),
+        };
+        self.contacts.push(new_contact);
+        self.save_contacts();
+    }
+
+    fn remove_contact(&mut self, index: usize) {
+        if index < self.contacts.len() {
+            self.contacts.remove(index);
+            self.save_contacts();
+            if let Some(selected) = self.selected_contact {
+                if selected == index {
+                    self.selected_contact = None;
+                } else if selected > index {
+                    self.selected_contact = Some(selected - 1);
+                }
+            }
+        }
+    }
+
+    fn load_messages_for_contact(&self, contact_address: &str) -> Vec<(String, String)> {
         if let Ok(cache) = self.message_cache.lock() {
             if let Some(messages) = cache.get(contact_address) {
                 return messages.clone();
@@ -95,6 +175,12 @@ impl AnotherChatApp {
         messages
     }
 
+    fn refresh_messages_for_contact(&self, contact_address: &str) {
+        if let Ok(mut cache) = self.message_cache.lock() {
+            cache.remove(contact_address);
+        }
+    }
+
     fn get_contact_alias(&self, onion_address: &str) -> Option<String> {
         self.contacts
             .iter()
@@ -106,6 +192,8 @@ impl AnotherChatApp {
         if let Some(contact_idx) = self.selected_contact {
             if let Some(contact) = self.contacts.get(contact_idx) {
                 let contact_address = contact.onion_address.clone();
+
+                self.refresh_messages_for_contact(&contact_address);
 
                 tokio::spawn(async move {
                     match send_message_to_peer(&message, &contact_address, 80).await {
@@ -119,11 +207,58 @@ impl AnotherChatApp {
 }
 
 impl eframe::App for AnotherChatApp {
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.check_for_handshakes();
+        self.refresh_contacts();
+
+        if self.show_alias_prompt {
+            egui::Window::new("New Contact")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    if let Some((onion_address, _)) = &self.pending_handshake {
+                        ui.label(format!(
+                            "Someone wants to connect: {}",
+                            if onion_address.len() > 20 {
+                                format!("{}...", &onion_address[..20])
+                            } else {
+                                onion_address.clone()
+                            }
+                        ));
+                        ui.separator();
+
+                        ui.label("Enter an alias for this contact:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.alias_input).hint_text("Alias"),
+                        );
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Accept").clicked() && !self.alias_input.trim().is_empty()
+                            {
+                                if let Some((onion_address, pk)) = self.pending_handshake.take() {
+                                    let new_contact = Contact {
+                                        onion_address,
+                                        alias: self.alias_input.trim().to_string(),
+                                        pk,
+                                    };
+                                    self.contacts.push(new_contact);
+                                    self.save_contacts();
+                                }
+                                self.show_alias_prompt = false;
+                                self.alias_input.clear();
+                            }
+
+                            if ui.button("Reject").clicked() {
+                                self.pending_handshake = None;
+                                self.show_alias_prompt = false;
+                                self.alias_input.clear();
+                            }
+                        });
+                    }
+                });
+        }
+
         egui::SidePanel::left("contacts").show(ctx, |ui| {
             ui.heading("Contacts");
 
@@ -139,7 +274,16 @@ impl eframe::App for AnotherChatApp {
                         contact.onion_address.clone()
                     };
 
-                    let button_text = format!("{}\n{}", contact.alias, truncated_address);
+                    let encryption_status = if contact.pk.is_empty() {
+                        "🔓"
+                    } else {
+                        "🔒"
+                    };
+
+                    let button_text = format!(
+                        "{} {}\n{}",
+                        encryption_status, contact.alias, truncated_address
+                    );
 
                     if ui.selectable_label(is_selected, button_text).clicked() {
                         self.selected_contact = Some(index);
@@ -153,14 +297,7 @@ impl eframe::App for AnotherChatApp {
             }
 
             if let Some(index) = to_remove {
-                self.contacts.remove(index);
-                if let Some(selected) = self.selected_contact {
-                    if selected == index {
-                        self.selected_contact = None;
-                    } else if selected > index {
-                        self.selected_contact = Some(selected - 1);
-                    }
-                }
+                self.remove_contact(index);
             }
 
             ui.collapsing("Add New Contact", |ui| {
@@ -177,12 +314,10 @@ impl eframe::App for AnotherChatApp {
 
                 ui.add_enabled_ui(can_add, |ui| {
                     if ui.button("Add Contact").clicked() {
-                        let new_contact = Contact {
-                            onion_address: self.new_onion_address.trim().to_string(),
-                            alias: self.new_alias.trim().to_string(),
-                        };
-
-                        self.contacts.push(new_contact);
+                        self.add_contact(
+                            self.new_onion_address.trim().to_string(),
+                            self.new_alias.trim().to_string(),
+                        );
                         self.new_onion_address.clear();
                         self.new_alias.clear();
                     }
