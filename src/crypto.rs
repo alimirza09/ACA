@@ -63,6 +63,7 @@ pub fn encode_public_key(pk: &PublicKey) -> String {
 }
 
 pub fn encrypt_message(msg: &[u8], their_pk: &PublicKey, my_sk: &SecretKey) -> Vec<u8> {
+    println!("Encrypt with: sender_sk={} ", encode_public_key(&their_pk));
     let nonce = box_::gen_nonce();
     let mut encrypted = box_::seal(msg, &nonce, their_pk, my_sk);
     let mut out = nonce.0.to_vec();
@@ -75,6 +76,7 @@ pub fn decrypt_message(
     their_pk: &PublicKey,
     my_sk: &SecretKey,
 ) -> Option<Vec<u8>> {
+    println!("Encrypt with: sender_sk={} ", encode_public_key(&their_pk));
     if ciphertext.len() < box_::NONCEBYTES {
         return None;
     }
