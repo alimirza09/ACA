@@ -24,8 +24,13 @@ pub fn generate_and_store_keypair(path: &Path) -> (PublicKey, SecretKey) {
 }
 
 pub fn load_keypair(path: &Path) -> (PublicKey, SecretKey) {
+    let pk_path = path.join("public.key");
+    let sk_path = path.join("secret.key");
+    if !(sk_path.exists() || pk_path.exists()) {
+        let _ = generate_and_store_keypair(path);
+    }
     let pk = {
-        let b64 = fs::read_to_string(path.join("public.key")).unwrap();
+        let b64 = fs::read_to_string(pk_path).unwrap();
         PublicKey(
             general_purpose::STANDARD
                 .decode(b64.trim())
@@ -35,7 +40,7 @@ pub fn load_keypair(path: &Path) -> (PublicKey, SecretKey) {
         )
     };
     let sk = {
-        let b64 = fs::read_to_string(path.join("secret.key")).unwrap();
+        let b64 = fs::read_to_string(sk_path).unwrap();
         SecretKey(
             general_purpose::STANDARD
                 .decode(b64.trim())
@@ -44,7 +49,8 @@ pub fn load_keypair(path: &Path) -> (PublicKey, SecretKey) {
                 .unwrap(),
         )
     };
-    (pk, sk)
+
+    return (pk, sk);
 }
 
 pub fn parse_public_key(b64: &str) -> Option<PublicKey> {
