@@ -380,10 +380,8 @@ pub fn can_encrypt_to_contact(onion_address: &str) -> bool {
         .find(|c| c.onion_address == onion_address)
         .map_or(false, |c| !c.pk.is_empty())
 }
-// Fix 1: Correct the handshake decode function
 fn decode_handshake(request: &str) -> Option<(&str, &str)> {
     let request = request.trim().strip_prefix("HANDSHAKE:")?;
-    // Fix: The original code was looking for ": " but the format uses ":"
     let parts: Vec<&str> = request.splitn(2, ':').collect();
     if parts.len() == 2 {
         let onion_peer = parts[0].trim();
@@ -394,7 +392,6 @@ fn decode_handshake(request: &str) -> Option<(&str, &str)> {
     }
 }
 
-// Fix 4: Enhanced handle_handshake with better logging
 async fn handle_handshake(request: &str) -> Result<()> {
     println!("Received handshake request: {}", request);
 
@@ -414,7 +411,6 @@ async fn handle_handshake(request: &str) -> Result<()> {
             store_pending_handshake(onion_peer, pk_peer_b64)?;
         }
 
-        // Send our handshake back
         println!("Sending handshake response to {}", onion_peer);
         handshake(onion_peer).await?;
     } else {
@@ -423,7 +419,6 @@ async fn handle_handshake(request: &str) -> Result<()> {
     Ok(())
 }
 
-// Fix 5: Add debugging to encryption functions
 fn encrypt_message_for_peer(message: &str, onion_peer: &str) -> Result<Vec<u8>> {
     let contacts = load_contacts_from_json();
     let contact = contacts
@@ -453,7 +448,6 @@ fn encrypt_message_for_peer(message: &str, onion_peer: &str) -> Result<Vec<u8>> 
     Ok(encrypted)
 }
 
-// Fix 6: Add a utility function to manually trigger handshake
 pub async fn force_handshake_with_contact(onion_peer: &str) -> Result<()> {
     println!("Forcing handshake with {}", onion_peer);
     handshake(onion_peer).await?;
@@ -461,7 +455,6 @@ pub async fn force_handshake_with_contact(onion_peer: &str) -> Result<()> {
     Ok(())
 }
 
-// Fix 1: Use consistent ports - don't hardcode port 8000 for handshake
 async fn handshake(onion_peer: &str) -> Result<()> {
     let (pk, _) = crypto_setup();
     let pk_b64 = encode_public_key(&pk);
@@ -469,7 +462,6 @@ async fn handshake(onion_peer: &str) -> Result<()> {
 
     println!("Performing handshake: sending our key to {}", onion_peer);
 
-    // Use port 80 for handshake too, same as messages
     let mut stream = connect_to_peer(onion_peer, 80)
         .await
         .context("Failed to connect for handshake")?;
@@ -486,7 +478,6 @@ async fn handshake(onion_peer: &str) -> Result<()> {
     Ok(())
 }
 
-// Fix 2: Add connection testing function
 pub async fn test_peer_connection(onion_peer: &str, port: u16) -> Result<bool> {
     println!("Testing connection to {}:{}", onion_peer, port);
 
@@ -494,7 +485,6 @@ pub async fn test_peer_connection(onion_peer: &str, port: u16) -> Result<bool> {
         Ok(mut stream) => {
             println!("✓ Successfully connected to {}:{}", onion_peer, port);
 
-            // Send a simple test message
             let test_msg = "PING\n";
             match stream.write_all(test_msg.as_bytes()).await {
                 Ok(_) => {
@@ -514,7 +504,6 @@ pub async fn test_peer_connection(onion_peer: &str, port: u16) -> Result<bool> {
     }
 }
 
-// Fix 3: Enhanced connect_to_peer with better error handling and timeout
 async fn connect_to_peer_with_timeout(
     onion_peer: &str,
     port: u16,
@@ -550,16 +539,13 @@ async fn connect_to_peer_with_timeout(
     }
 }
 
-// Fix 4: Update connect_to_peer to use the timeout version
 async fn connect_to_peer(onion_peer: &str, port: u16) -> Result<TcpStream> {
     connect_to_peer_with_timeout(onion_peer, port, 30).await
 }
 
-// Fix 5: Add Tor connectivity test
 pub async fn test_tor_connectivity() -> Result<()> {
     println!("Testing Tor connectivity...");
 
-    // Test SOCKS5 proxy
     match TcpStream::connect("127.0.0.1:9050").await {
         Ok(_) => println!("✓ Tor SOCKS5 proxy is accessible"),
         Err(e) => {
@@ -568,7 +554,6 @@ pub async fn test_tor_connectivity() -> Result<()> {
         }
     }
 
-    // Test connecting to a known onion service (DuckDuckGo)
     match connect_to_peer("3g2upl4pq6kufc4m.onion", 80).await {
         Ok(_) => println!("✓ Can connect to onion services"),
         Err(e) => {
@@ -581,79 +566,19 @@ pub async fn test_tor_connectivity() -> Result<()> {
     Ok(())
 }
 
-// Fix 6: Add peer reachability test before handshake
-pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) -> Result<()> {
-    let onion_address = determine_onion_address()?;
-
-    // Check if we need to do handshake
-    let contacts = load_contacts_from_json();
-    let needs_handshake = contacts
-        .iter()
-        .find(|c| c.onion_address == onion_peer)
-        .map_or(true, |c| c.pk.is_empty());
-
-    if needs_handshake {
-        println!("Contact needs handshake, testing connectivity first...");
-
-        // Test if peer is reachable before attempting handshake
-        match test_peer_connection(onion_peer, port).await {
-            Ok(true) => {
-                println!("Peer is reachable, proceeding with handshake");
-                handshake(onion_peer).await?;
-            }
-            Ok(false) => {
-                return Err(anyhow::anyhow!(
-                    "Peer is reachable but not responding correctly"
-                ));
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!("Cannot reach peer {}: {}", onion_peer, e));
-            }
-        }
-    }
-
-    // Connect and send the actual message
-    let mut stream = connect_to_peer(onion_peer, port).await?;
-
-    let message_to_send = match encrypt_message_for_peer(message, onion_peer) {
-        Ok(encrypted) => {
-            let encoded = general_purpose::STANDARD.encode(encrypted);
-            println!("Sending encrypted message to {}", onion_peer);
-            format!("ENCRYPTED_MSG:{} FROM:{}", encoded, onion_address)
-        }
-        Err(e) => {
-            println!(
-                "Failed to encrypt message for {}: {}, sending plaintext",
-                onion_peer, e
-            );
-            format!("MSG:{} FROM:{}", message, onion_address)
-        }
-    };
-
-    stream.write_all(message_to_send.as_bytes()).await?;
-    stream.flush().await?;
-    handle_outgoing_message(message, onion_peer).await;
-    Ok(())
-}
-
-// Fix 7: Add debugging command to test everything
 pub async fn debug_connection_stack(onion_peer: &str) -> Result<()> {
     println!("=== Connection Debug Stack for {} ===", onion_peer);
 
-    // 1. Test Tor connectivity
     println!("\n1. Testing Tor connectivity...");
     test_tor_connectivity().await?;
 
-    // 2. Test peer connection
     println!("\n2. Testing peer connection...");
     test_peer_connection(onion_peer, 80).await?;
 
-    // 3. Check our own service
     println!("\n3. Checking our own service...");
     let our_address = determine_onion_address()?;
     println!("Our onion address: {}", our_address);
 
-    // 4. Show contact status
     println!("\n4. Contact status...");
     let contacts = load_contacts_from_json();
     if let Some(contact) = contacts.iter().find(|c| c.onion_address == onion_peer) {
@@ -782,37 +707,6 @@ async fn handshake_simple(onion_peer: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) -> Result<()> {
-    println!("New connection from: {}", addr);
-
-    let mut buffer = [0; 2048];
-    let bytes_read = stream
-        .read(&mut buffer)
-        .await
-        .context("Failed to read from connection")?;
-
-    if bytes_read > 0 {
-        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("Received request: {}", request);
-
-        if request.starts_with("MSG:") || request.starts_with("ENCRYPTED_MSG:") {
-            println!("Handling message");
-            handle_incoming_message(&request).await;
-        } else if request.starts_with("HANDSHAKE:") {
-            println!("Handling handshake with response capability");
-            if let Err(e) = handle_handshake_with_response(&request, Some(&mut stream)).await {
-                eprintln!("Failed to handle handshake: {}", e);
-            } else {
-                println!("Handshake handled successfully with response");
-            }
-        } else {
-            println!("Unknown request type: {}", request);
-        }
-    }
-
-    Ok(())
-}
-
 pub async fn send_message_to_peer_fixed(message: &str, onion_peer: &str, port: u16) -> Result<()> {
     let onion_address = determine_onion_address()?;
 
@@ -895,4 +789,179 @@ pub fn debug_contact_status(onion_address: &str) {
     } else {
         println!("Contact {} not found", onion_address);
     }
+}
+pub async fn send_message_to_peer(message: &str, onion_peer: &str, port: u16) -> Result<()> {
+    let onion_address = determine_onion_address()?;
+
+    let contacts = load_contacts_from_json();
+    let needs_handshake = contacts
+        .iter()
+        .find(|c| c.onion_address == onion_peer)
+        .map_or(true, |c| c.pk.is_empty());
+
+    if needs_handshake {
+        println!("Starting handshake with {}", onion_peer);
+
+        let our_address = determine_onion_address()?;
+        let (our_pk, _) = crypto_setup();
+        let our_pk_b64 = encode_public_key(&our_pk);
+
+        let mut stream = connect_to_peer(onion_peer, port).await?;
+        let handshake_msg = format!("HANDSHAKE_REQUEST:{}:{}", our_address.trim(), our_pk_b64);
+
+        stream.write_all(handshake_msg.as_bytes()).await?;
+        stream.flush().await?;
+
+        let mut buffer = [0; 2048];
+        match tokio::time::timeout(Duration::from_secs(15), stream.read(&mut buffer)).await {
+            Ok(Ok(bytes_read)) if bytes_read > 0 => {
+                let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+                if response.starts_with("HANDSHAKE_RESPONSE:") {
+                    if let Some((peer_address, peer_key)) = decode_handshake_response(&response) {
+                        if let Some(_) = contacts.iter().find(|c| c.onion_address == peer_address) {
+                            update_contact_pk(peer_address, peer_key)?;
+                        } else {
+                            store_pending_handshake(peer_address, peer_key)?;
+                        }
+
+                        let ack_msg =
+                            format!("HANDSHAKE_ACK:{}:{}", our_address.trim(), our_pk_b64);
+                        stream.write_all(ack_msg.as_bytes()).await?;
+                        stream.flush().await?;
+                    }
+                } else if response.starts_with("HANDSHAKE:") {
+                    handle_handshake(&response).await?;
+                }
+            }
+            _ => {}
+        }
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+
+    let mut stream = connect_to_peer(onion_peer, port).await?;
+
+    let message_to_send = match encrypt_message_for_peer(message, onion_peer) {
+        Ok(encrypted) => {
+            let encoded = general_purpose::STANDARD.encode(encrypted);
+            format!("ENCRYPTED_MSG:{} FROM:{}", encoded, onion_address)
+        }
+        Err(_) => {
+            format!("MSG:{} FROM:{}", message, onion_address)
+        }
+    };
+
+    stream.write_all(message_to_send.as_bytes()).await?;
+    stream.flush().await?;
+    handle_outgoing_message(message, onion_peer).await;
+
+    Ok(())
+}
+
+async fn handle_connection(mut stream: TcpStream, addr: std::net::SocketAddr) -> Result<()> {
+    println!("New connection from: {}", addr);
+
+    let mut buffer = [0; 2048];
+    let bytes_read = stream.read(&mut buffer).await?;
+
+    if bytes_read > 0 {
+        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+        if request.starts_with("HANDSHAKE_REQUEST:") {
+            handle_handshake_request(&request, &mut stream).await?;
+        } else if request.starts_with("HANDSHAKE_ACK:") {
+            handle_handshake_ack(&request).await?;
+        } else if request.starts_with("HANDSHAKE:") {
+            handle_handshake_old_format(&request, &mut stream).await?;
+        } else if request.starts_with("MSG:") || request.starts_with("ENCRYPTED_MSG:") {
+            handle_incoming_message(&request).await;
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_handshake_request(request: &str, stream: &mut TcpStream) -> Result<()> {
+    if let Some((peer_address, peer_key)) = decode_handshake_request(request) {
+        let contacts = load_contacts_from_json();
+        if let Some(_) = contacts.iter().find(|c| c.onion_address == peer_address) {
+            update_contact_pk(peer_address, peer_key)?;
+        } else {
+            store_pending_handshake(peer_address, peer_key)?;
+        }
+
+        let our_address = determine_onion_address()?;
+        let (our_pk, _) = crypto_setup();
+        let our_pk_b64 = encode_public_key(&our_pk);
+        let response = format!("HANDSHAKE_RESPONSE:{}:{}", our_address.trim(), our_pk_b64);
+
+        stream.write_all(response.as_bytes()).await?;
+        stream.flush().await?;
+
+        let mut buffer = [0; 1024];
+        tokio::time::timeout(Duration::from_secs(10), stream.read(&mut buffer))
+            .await
+            .ok();
+    }
+
+    Ok(())
+}
+
+async fn handle_handshake_ack(request: &str) -> Result<()> {
+    if let Some((peer_address, peer_key)) = decode_handshake_ack(request) {
+        let contacts = load_contacts_from_json();
+        if let Some(_) = contacts.iter().find(|c| c.onion_address == peer_address) {
+            update_contact_pk(peer_address, peer_key)?;
+        } else {
+            store_pending_handshake(peer_address, peer_key)?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_handshake_old_format(request: &str, stream: &mut TcpStream) -> Result<()> {
+    if let Some((peer_address, peer_key)) = decode_handshake(request) {
+        let contacts = load_contacts_from_json();
+        if let Some(_) = contacts.iter().find(|c| c.onion_address == peer_address) {
+            update_contact_pk(peer_address, peer_key)?;
+        } else {
+            store_pending_handshake(peer_address, peer_key)?;
+        }
+
+        let our_address = determine_onion_address()?;
+        let (our_pk, _) = crypto_setup();
+        let our_pk_b64 = encode_public_key(&our_pk);
+        let response = format!("HANDSHAKE:{}:{}", our_address.trim(), our_pk_b64);
+
+        stream.write_all(response.as_bytes()).await?;
+        stream.flush().await?;
+    }
+
+    Ok(())
+}
+
+fn decode_handshake_request(request: &str) -> Option<(&str, &str)> {
+    let request = request.trim().strip_prefix("HANDSHAKE_REQUEST:")?;
+    let colon_pos = request.find(':')?;
+    let peer_address = request[..colon_pos].trim();
+    let peer_key = request[colon_pos + 1..].trim();
+    Some((peer_address, peer_key))
+}
+
+fn decode_handshake_response(response: &str) -> Option<(&str, &str)> {
+    let response = response.trim().strip_prefix("HANDSHAKE_RESPONSE:")?;
+    let colon_pos = response.find(':')?;
+    let peer_address = response[..colon_pos].trim();
+    let peer_key = response[colon_pos + 1..].trim();
+    Some((peer_address, peer_key))
+}
+
+fn decode_handshake_ack(ack: &str) -> Option<(&str, &str)> {
+    let ack = ack.trim().strip_prefix("HANDSHAKE_ACK:")?;
+    let colon_pos = ack.find(':')?;
+    let peer_address = ack[..colon_pos].trim();
+    let peer_key = ack[colon_pos + 1..].trim();
+    Some((peer_address, peer_key))
 }
