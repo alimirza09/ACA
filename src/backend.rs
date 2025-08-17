@@ -159,11 +159,6 @@ pub fn remove_file(file: std::path::PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn check_if_first_contact(onion_peer: &str) -> bool {
-    let message_file = message_file(onion_peer);
-    !message_file.exists()
-}
-
 fn determine_onion_address() -> Result<String> {
     let (_, tor_data_dir) = create_data_directories();
     let hostname_file = tor_data_dir.join("hidden_service").join("hostname");
@@ -644,65 +639,6 @@ async fn handshake_with_response(onion_peer: &str) -> Result<()> {
             println!("⚠ Timeout waiting for handshake response");
         }
     }
-
-    Ok(())
-}
-
-async fn handle_handshake_with_response(
-    request: &str,
-    response_stream: Option<&mut TcpStream>,
-) -> Result<()> {
-    println!("Received handshake request: {}", request);
-
-    if let Some((onion_peer, pk_peer_b64)) = decode_handshake(request) {
-        println!(
-            "Decoded handshake from {} with key {}",
-            onion_peer,
-            &pk_peer_b64[..20]
-        );
-
-        let contacts = load_contacts_from_json();
-        if let Some(_existing_contact) = contacts.iter().find(|c| c.onion_address == onion_peer) {
-            println!("Updating existing contact {} with public key", onion_peer);
-            update_contact_pk(onion_peer, pk_peer_b64)?;
-        } else {
-            println!("Storing pending handshake for new contact {}", onion_peer);
-            store_pending_handshake(onion_peer, pk_peer_b64)?;
-        }
-
-        if let Some(stream) = response_stream {
-            let (our_pk, _) = crypto_setup();
-            let our_pk_b64 = encode_public_key(&our_pk);
-            let our_address = determine_onion_address()?;
-            let response_handshake = format!("HANDSHAKE:{}:{}", our_address.trim(), our_pk_b64);
-
-            println!("Sending handshake response: {}", response_handshake);
-            stream.write_all(response_handshake.as_bytes()).await?;
-            stream.flush().await?;
-        } else {
-            println!("Initiating separate handshake response to {}", onion_peer);
-            handshake_simple(onion_peer).await?;
-        }
-    } else {
-        println!("Failed to decode handshake request: {}", request);
-    }
-    Ok(())
-}
-
-async fn handshake_simple(onion_peer: &str) -> Result<()> {
-    let (pk, _) = crypto_setup();
-    let pk_b64 = encode_public_key(&pk);
-    let onion_address = determine_onion_address()?;
-
-    let mut stream = connect_to_peer(onion_peer, 80)
-        .await
-        .context("Failed to connect for handshake response")?;
-
-    let handshake = format!("HANDSHAKE:{}:{}", onion_address.trim(), pk_b64);
-    println!("Sending simple handshake: {}", handshake);
-
-    stream.write_all(handshake.as_bytes()).await?;
-    stream.flush().await?;
 
     Ok(())
 }

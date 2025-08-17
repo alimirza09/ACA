@@ -55,7 +55,6 @@ impl AnotherChatApp {
             alias_input: String::new(),
             message_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
-
         app
     }
 
@@ -84,17 +83,6 @@ impl AnotherChatApp {
         }
     }
 
-    fn update_contact_pk(&mut self, onion_address: &str, pk: String) {
-        if let Some(contact) = self
-            .contacts
-            .iter_mut()
-            .find(|c| c.onion_address == onion_address)
-        {
-            contact.pk = pk;
-            self.save_contacts();
-        }
-    }
-
     fn refresh_contacts(&mut self) {
         let all_contacts = load_contacts_from_json();
         for contact in all_contacts {
@@ -118,7 +106,6 @@ impl AnotherChatApp {
             .iter()
             .any(|c| c.onion_address == onion_address)
         {
-            // Optionally notify user of duplicate
             return;
         }
         let new_contact = Contact {
@@ -150,10 +137,8 @@ impl AnotherChatApp {
                 return messages.clone();
             }
         }
-
         let (data_dir, _) = create_data_directories();
         let message_file = data_dir.join("messages").join(contact_address);
-
         let messages = match std::fs::read_to_string(&message_file) {
             Ok(buffer) => buffer
                 .lines()
@@ -176,11 +161,9 @@ impl AnotherChatApp {
                 .collect(),
             Err(_) => Vec::new(),
         };
-
         if let Ok(mut cache) = self.message_cache.lock() {
             cache.insert(contact_address.to_string(), messages.clone());
         }
-
         messages
     }
 
@@ -201,13 +184,19 @@ impl AnotherChatApp {
         if let Some(contact_idx) = self.selected_contact {
             if let Some(contact) = self.contacts.get(contact_idx) {
                 let contact_address = contact.onion_address.clone();
-
-                self.refresh_messages_for_contact(&contact_address);
-
-                tokio::spawn(async move {
-                    match send_message_to_peer(&message, &contact_address, 80).await {
-                        Ok(_) => println!("Message sent to {}", contact_address),
-                        Err(err) => eprintln!("Failed to send to {}: {:?}", contact_address, err),
+                tokio::spawn({
+                    let address = contact_address.clone();
+                    let msg = message.clone();
+                    let cache = Arc::clone(&self.message_cache);
+                    async move {
+                        match send_message_to_peer(&msg, &address, 80).await {
+                            Ok(_) => {
+                                if let Ok(mut cache) = cache.lock() {
+                                    cache.remove(&address);
+                                }
+                            }
+                            Err(_) => {}
+                        }
                     }
                 });
             }
@@ -217,12 +206,9 @@ impl AnotherChatApp {
 
 impl eframe::App for AnotherChatApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Set up periodic repaints for real-time updates
         ctx.request_repaint_after(Duration::from_millis(500));
-
         self.check_for_handshakes();
         self.refresh_contacts();
-
         if self.show_alias_prompt {
             egui::Window::new("New Contact")
                 .collapsible(false)
@@ -239,12 +225,10 @@ impl eframe::App for AnotherChatApp {
                             }
                         ));
                         ui.separator();
-
                         ui.label("Enter an alias for this contact:");
                         ui.add(
                             egui::TextEdit::singleline(&mut self.alias_input).hint_text("Alias"),
                         );
-
                         ui.horizontal(|ui| {
                             if ui.button("Accept").clicked() && !self.alias_input.trim().is_empty()
                             {
@@ -260,7 +244,6 @@ impl eframe::App for AnotherChatApp {
                                 self.show_alias_prompt = false;
                                 self.alias_input.clear();
                             }
-
                             if ui.button("Reject").clicked() {
                                 self.pending_handshake = None;
                                 self.show_alias_prompt = false;
@@ -270,68 +253,54 @@ impl eframe::App for AnotherChatApp {
                     }
                 });
         }
-
         egui::SidePanel::left("contacts").show(ctx, |ui| {
             ui.heading("Contacts");
-
             let mut to_remove = None;
             let mut select_contact = None;
-
             for (index, contact) in self.contacts.iter().enumerate() {
                 let is_selected = self.selected_contact == Some(index);
-
                 let truncated_address = if contact.onion_address.len() > 16 {
                     format!("{}...", &contact.onion_address[..16])
                 } else {
                     contact.onion_address.clone()
                 };
-
                 let encryption_status = if contact.pk.is_empty() {
                     "🔓"
                 } else {
                     "🔒"
                 };
-
                 let button_text = format!(
                     "{} {}\n{}",
                     encryption_status, contact.alias, truncated_address
                 );
-
                 ui.horizontal(|ui| {
                     if ui.selectable_label(is_selected, button_text).clicked() {
                         select_contact = Some(index);
                     }
-
                     if ui.small_button("🗑").clicked() {
                         to_remove = Some(index);
                     }
                 });
                 ui.separator();
             }
-
             if let Some(index) = to_remove {
                 self.remove_contact(index);
             }
-
             if let Some(index) = select_contact {
                 self.selected_contact = Some(index);
                 if let Some(contact) = self.contacts.get(index) {
                     self.refresh_messages_for_contact(&contact.onion_address);
                 }
             }
-
             ui.collapsing("Add New Contact", |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.new_onion_address)
                         .hint_text("Onion address"),
                 );
-
                 ui.add(egui::TextEdit::singleline(&mut self.new_alias).hint_text("Alias"));
-
                 let can_add = !self.new_onion_address.trim().is_empty()
                     && !self.new_alias.trim().is_empty()
                     && self.validate_onion_address(self.new_onion_address.trim());
-
                 ui.add_enabled_ui(can_add, |ui| {
                     if ui.button("Add Contact").clicked() {
                         self.add_contact(
@@ -344,15 +313,14 @@ impl eframe::App for AnotherChatApp {
                 });
             });
         });
-
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(contact_idx) = self.selected_contact {
-                let contact_address = self
+                if let Some(contact_address) = self
                     .contacts
                     .get(contact_idx)
-                    .map(|c| c.onion_address.clone());
-
-                if let Some(contact_address) = contact_address {
+                    .map(|c| c.onion_address.clone())
+                {
+                    self.refresh_messages_for_contact(&contact_address);
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                         ui.horizontal(|ui| {
                             let response = ui.add_sized(
@@ -360,7 +328,6 @@ impl eframe::App for AnotherChatApp {
                                 egui::TextEdit::singleline(&mut self.message_field)
                                     .hint_text("Message"),
                             );
-
                             if response.lost_focus()
                                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                 && !self.message_field.trim().is_empty()
@@ -369,7 +336,6 @@ impl eframe::App for AnotherChatApp {
                                 self.send_message_to_selected_contact(message);
                                 self.message_field.clear();
                             }
-
                             if ui.button("Send").clicked() && !self.message_field.trim().is_empty()
                             {
                                 let message = self.message_field.trim().to_string();
@@ -396,10 +362,8 @@ impl eframe::App for AnotherChatApp {
                                             Color32::WHITE,
                                         )
                                     };
-
                                     let padding = egui::vec2(8.0, 4.0);
                                     let rounding = 8.0;
-
                                     ui.with_layout(egui::Layout::bottom_up(align), |ui| {
                                         let font_id = egui::TextStyle::Body.resolve(ui.style());
                                         let max_text_width = ui.available_width() * 0.75;
@@ -411,9 +375,7 @@ impl eframe::App for AnotherChatApp {
                                                 max_text_width,
                                             )
                                         });
-
                                         let size = galley.size() + 2.0 * padding;
-
                                         let (rect, _) =
                                             ui.allocate_exact_size(size, egui::Sense::hover());
                                         ui.painter().rect_filled(rect, rounding, bg_color);
@@ -423,11 +385,9 @@ impl eframe::App for AnotherChatApp {
                                             Color32::WHITE,
                                         );
                                     });
-
                                     ui.add_space(5.0);
                                 }
                             });
-
                         ui.separator();
                     });
                 }
