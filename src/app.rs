@@ -2,6 +2,7 @@ use crate::backend::*;
 use egui::Color32;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use tokio::time::Duration;
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct Contact {
@@ -112,6 +113,14 @@ impl AnotherChatApp {
     }
 
     fn add_contact(&mut self, onion_address: String, alias: String) {
+        if self
+            .contacts
+            .iter()
+            .any(|c| c.onion_address == onion_address)
+        {
+            // Optionally notify user of duplicate
+            return;
+        }
         let new_contact = Contact {
             onion_address,
             alias,
@@ -208,6 +217,9 @@ impl AnotherChatApp {
 
 impl eframe::App for AnotherChatApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Set up periodic repaints for real-time updates
+        ctx.request_repaint_after(Duration::from_millis(500));
+
         self.check_for_handshakes();
         self.refresh_contacts();
 
@@ -263,30 +275,31 @@ impl eframe::App for AnotherChatApp {
             ui.heading("Contacts");
 
             let mut to_remove = None;
+            let mut select_contact = None;
 
             for (index, contact) in self.contacts.iter().enumerate() {
                 let is_selected = self.selected_contact == Some(index);
 
+                let truncated_address = if contact.onion_address.len() > 16 {
+                    format!("{}...", &contact.onion_address[..16])
+                } else {
+                    contact.onion_address.clone()
+                };
+
+                let encryption_status = if contact.pk.is_empty() {
+                    "🔓"
+                } else {
+                    "🔒"
+                };
+
+                let button_text = format!(
+                    "{} {}\n{}",
+                    encryption_status, contact.alias, truncated_address
+                );
+
                 ui.horizontal(|ui| {
-                    let truncated_address = if contact.onion_address.len() > 16 {
-                        format!("{}...", &contact.onion_address[..16])
-                    } else {
-                        contact.onion_address.clone()
-                    };
-
-                    let encryption_status = if contact.pk.is_empty() {
-                        "🔓"
-                    } else {
-                        "🔒"
-                    };
-
-                    let button_text = format!(
-                        "{} {}\n{}",
-                        encryption_status, contact.alias, truncated_address
-                    );
-
                     if ui.selectable_label(is_selected, button_text).clicked() {
-                        self.selected_contact = Some(index);
+                        select_contact = Some(index);
                     }
 
                     if ui.small_button("🗑").clicked() {
@@ -298,6 +311,13 @@ impl eframe::App for AnotherChatApp {
 
             if let Some(index) = to_remove {
                 self.remove_contact(index);
+            }
+
+            if let Some(index) = select_contact {
+                self.selected_contact = Some(index);
+                if let Some(contact) = self.contacts.get(index) {
+                    self.refresh_messages_for_contact(&contact.onion_address);
+                }
             }
 
             ui.collapsing("Add New Contact", |ui| {
