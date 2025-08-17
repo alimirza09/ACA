@@ -323,8 +323,9 @@ impl eframe::App for AnotherChatApp {
                     self.refresh_messages_for_contact(&contact_address);
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                         ui.horizontal(|ui| {
+                            let width = (ui.available_width() - 60.0).max(100.0);
                             let response = ui.add_sized(
-                                [ui.available_width() - 60.0, 20.0],
+                                [width, 20.0],
                                 egui::TextEdit::singleline(&mut self.message_field)
                                     .hint_text("Message"),
                             );
