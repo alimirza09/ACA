@@ -1,22 +1,23 @@
 # Another Chat App (ACA)
+
 A true **P2P** private instant messaging app written in Rust.
 
-## Features ✨
+## Features
+
 - **End-to-end encryption**  
 - **True P2P**: no central servers, no bootstrap nodes  
 - **No timestamps**: less metadata for the glowies  
-- **Limited chat history in the GUI**: only a small portion of chat history is visible, reducing context available to onlookers  
+- **Limited chat history in the GUI**: only a small portion of chat history is visible, reducing context available to onlookers
 
-## Technical Details 🥱
-ACA works by creating a Tor onion service and communicating with peers through WebSockets.  
-The first message is sent after a handshake where peers exchange their public keys.  
+## Technical Details
+
+ACA works by creating a Tor onion service and communicating with peers through WebSockets.
+The first message is sent after a handshake where peers exchange their public keys.
 
 - **Public/private keys**: Curve25519 elliptic-curve Diffie–Hellman (ECDH)  
-- **Message encryption & authentication**: XSalsa20 stream cipher with Poly1305 MAC  
+- **Message encryption & authentication**: XSalsa20 stream cipher with Poly1305 MAC
 
-## Security Considerations 🔒
-
-⚠️ **ACA is experimental software. Do not rely on it for secure communications.**  
+## Security Considerations
 
 While ACA uses strong cryptographic primitives, there are important limitations:
 
@@ -39,17 +40,18 @@ While ACA uses strong cryptographic primitives, there are important limitations:
 - **Limited Audit**  
   The codebase has not undergone a professional security audit. Use at your own risk.
 
-## Licensing ⚖️
+## Licensing
+
 This project is licensed under the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**.  
 See the [LICENSE](LICENSE) file for details or visit <https://www.gnu.org/licenses/gpl-3.0.html>.
 
-## Disclaimer ⚠️
+## Disclaimer
 
-This software is provided "as is", without warranty of any kind, express or implied, 
-including but not limited to the warranties of merchantability, fitness for a particular purpose, 
+This software is provided "as is", without warranty of any kind, express or implied,
+including but not limited to the warranties of merchantability, fitness for a particular purpose,
 and noninfringement. In no event shall the authors or copyright holders be liable 
-for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, 
-arising from, out of, or in connection with the software or the use or other dealings in the software.  
+for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise,
+arising from, out of, or in connection with the software or the use or other dealings in the software.
 
-This project is a **research/hobby project** and should **not be relied upon for secure communications**.  
+This project is a **research/hobby project** and should **not be relied upon for secure communications**.
 Use at your own risk.
