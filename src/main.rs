@@ -1,13 +1,10 @@
-#![warn(clippy::all, rust_2018_idioms)]
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
-
 use another_chat_app::backend::setup_tor_and_http;
 use anyhow::Result;
 use tokio;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    env_logger::init();
     another_chat_app::crypto::init_crypto();
 
     let port = 8000;
